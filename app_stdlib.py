@@ -619,12 +619,13 @@ def oauth_m2m_token(cfg: dict[str, str]) -> str:
 
 
 def discover_token_endpoint(host: str) -> str:
-    host = host.rstrip("/")
+    host = normalize_host(host)
     discovery_urls: list[str] = []
     try:
         metadata = http_json("GET", f"{host}/.well-known/databricks-config", timeout=10)
         oidc_endpoint = str(metadata.get("oidc_endpoint") or "").rstrip("/")
         if oidc_endpoint:
+            oidc_endpoint = normalize_url(oidc_endpoint, host)
             discovery_urls.append(f"{oidc_endpoint}/.well-known/oauth-authorization-server")
     except Exception:
         pass
@@ -635,7 +636,7 @@ def discover_token_endpoint(host: str) -> str:
             payload = http_json("GET", url, timeout=10)
             token_endpoint = payload.get("token_endpoint")
             if token_endpoint:
-                return str(token_endpoint)
+                return normalize_url(str(token_endpoint), host)
         except Exception:
             continue
     return f"{host}/oidc/v1/token"
@@ -991,8 +992,9 @@ def health_config() -> dict[str, Any]:
 
 
 def config() -> dict[str, str]:
+    host = normalize_host(os.getenv("DATABRICKS_HOST") or DEFAULT_DATABRICKS_HOST)
     return {
-        "host": (os.getenv("DATABRICKS_HOST") or DEFAULT_DATABRICKS_HOST).strip().rstrip("/"),
+        "host": host,
         "genie_space_id": (os.getenv("GENIE_SPACE_ID") or DEFAULT_GENIE_SPACE_ID).strip(),
         "warehouse_id": (os.getenv("DATABRICKS_WAREHOUSE_ID") or "").strip(),
         "token": (os.getenv("DATABRICKS_TOKEN") or "").strip(),
@@ -1004,6 +1006,22 @@ def config() -> dict[str, str]:
         "oauth_scope": (os.getenv("DATABRICKS_OAUTH_SCOPE") or "all-apis").strip(),
         "llm_endpoint": (os.getenv("DATABRICKS_LLM_ENDPOINT") or DEFAULT_LLM_ENDPOINT).strip(),
     }
+
+
+def normalize_host(value: str) -> str:
+    host = (value or DEFAULT_DATABRICKS_HOST).strip().rstrip("/")
+    if not host.startswith(("http://", "https://")):
+        host = "https://" + host
+    return host
+
+
+def normalize_url(value: str, host: str) -> str:
+    url = value.strip()
+    if url.startswith(("http://", "https://")):
+        return url.rstrip("/")
+    if url.startswith("/"):
+        return normalize_host(host) + url.rstrip("/")
+    return normalize_host(url)
 
 
 def load_env_file() -> None:
