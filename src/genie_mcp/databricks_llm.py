@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from typing import Any
 from urllib.parse import quote
 
 import httpx
-from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import DatabricksError
 
+from .auth import resolve_bearer_token
 from .config import GenieConfig
-from .databricks_genie import GenieAPIError, _get_cli_access_token
+from .databricks_genie import GenieAPIError
 
 
 DEFAULT_LLM_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
@@ -21,27 +19,15 @@ class DatabricksLLMClient:
     def __init__(self, config: GenieConfig, endpoint: str | None = None):
         self.config = config
         self.endpoint = endpoint or DEFAULT_LLM_ENDPOINT
-        self._client: httpx.AsyncClient | None = None
-        self._sdk_client: WorkspaceClient | None = None
-
-        bearer_token = self._resolve_bearer_token()
-        if bearer_token:
-            self._client = httpx.AsyncClient(
-                base_url=config.databricks_host,
-                headers={
-                    "Authorization": f"Bearer {bearer_token}",
-                    "Content-Type": "application/json",
-                },
-                timeout=httpx.Timeout(120.0, connect=20.0),
-            )
-        else:
-            self._sdk_client = WorkspaceClient(
-                host=config.databricks_host,
-                auth_type=config.databricks_auth_type,
-                profile=config.databricks_config_profile,
-                product="databricks-genie-mcp-agent",
-                product_version="0.1.0",
-            )
+        bearer_token = resolve_bearer_token(config)
+        self._client = httpx.AsyncClient(
+            base_url=config.databricks_host,
+            headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=httpx.Timeout(120.0, connect=20.0),
+        )
 
     async def __aenter__(self) -> "DatabricksLLMClient":
         return self
@@ -50,8 +36,7 @@ class DatabricksLLMClient:
         await self.close()
 
     async def close(self) -> None:
-        if self._client:
-            await self._client.aclose()
+        await self._client.aclose()
 
     async def chat(
         self,
@@ -61,42 +46,23 @@ class DatabricksLLMClient:
         max_tokens: int = 700,
     ) -> str:
         endpoint_name = quote(self.endpoint, safe="")
-        payload = {
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if self._client:
-            response = await self._client.post(
-                f"/serving-endpoints/{endpoint_name}/invocations",
-                json=payload,
-            )
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                body = response.text[:2000]
-                raise GenieAPIError(
-                    f"Databricks LLM endpoint returned HTTP {response.status_code}: {body}"
-                ) from exc
-
-            return _extract_chat_content(response.json())
-
-        if not self._sdk_client:
-            raise GenieAPIError("Databricks LLM client was not initialized.")
-
+        response = await self._client.post(
+            f"/serving-endpoints/{endpoint_name}/invocations",
+            json={
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+        )
         try:
-            result = await asyncio.to_thread(
-                self._sdk_client.api_client.do,
-                "POST",
-                f"/serving-endpoints/{endpoint_name}/invocations",
-                body=payload,
-            )
-        except DatabricksError as exc:
-            raise GenieAPIError(f"Databricks LLM endpoint request failed: {exc}") from exc
-        except Exception as exc:
-            raise GenieAPIError(f"Databricks LLM endpoint request could not be completed: {exc}") from exc
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = response.text[:2000]
+            raise GenieAPIError(
+                f"Databricks LLM endpoint returned HTTP {response.status_code}: {body}"
+            ) from exc
 
-        return _extract_chat_content(result if isinstance(result, dict) else {"result": result})
+        return _extract_chat_content(response.json())
 
     async def rewrite_for_genie(
         self,
@@ -114,18 +80,6 @@ class DatabricksLLMClient:
             max_tokens=700,
         )
         return _parse_rewrite_response(content, user_question)
-
-    def _resolve_bearer_token(self) -> str | None:
-        if self.config.databricks_token:
-            return self.config.databricks_token
-
-        if self.config.databricks_auth_type == "databricks-cli":
-            return _get_cli_access_token(
-                cli_path=self.config.databricks_cli_path,
-                profile=self.config.databricks_config_profile,
-            )
-
-        return None
 
 
 REWRITE_SYSTEM_PROMPT = """
@@ -210,7 +164,7 @@ def _parse_rewrite_response(content: str, fallback_question: str) -> dict[str, A
             "clarifying_question": "",
             "genie_question": fallback_question,
             "assumptions": [
-                "Databricks LLM 回覆不是有效 JSON，因此改用原始問題。"
+                "Databricks LLM response was not valid JSON, so the original question was used."
             ],
             "raw_llm_response": content,
         }

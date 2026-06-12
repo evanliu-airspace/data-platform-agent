@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import time
 from typing import Any
 from urllib.parse import quote
 
 import httpx
-from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import DatabricksError
 
-from .config import GenieConfig, PROJECT_ROOT
+from .auth import resolve_bearer_token
+from .config import GenieConfig
 
 
 TERMINAL_STATUSES = {"COMPLETED", "FAILED", "CANCELLED"}
@@ -28,27 +26,17 @@ class GenieTimeoutError(RuntimeError):
 class DatabricksGenieClient:
     def __init__(self, config: GenieConfig):
         self.config = config
-        self._sdk_client: WorkspaceClient | None = None
         self._http_client: httpx.AsyncClient | None = None
 
-        bearer_token = self._resolve_bearer_token()
-        if bearer_token:
-            self._http_client = httpx.AsyncClient(
-                base_url=config.databricks_host,
-                headers={
-                    "Authorization": f"Bearer {bearer_token}",
-                    "Content-Type": "application/json",
-                },
-                timeout=httpx.Timeout(60.0, connect=20.0),
-            )
-        else:
-            self._sdk_client = WorkspaceClient(
-                host=config.databricks_host,
-                auth_type=config.databricks_auth_type,
-                profile=config.databricks_config_profile,
-                product="databricks-genie-mcp-agent",
-                product_version="0.1.0",
-            )
+        bearer_token = resolve_bearer_token(config)
+        self._http_client = httpx.AsyncClient(
+            base_url=config.databricks_host,
+            headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=httpx.Timeout(60.0, connect=20.0),
+        )
 
     async def __aenter__(self) -> "DatabricksGenieClient":
         return self
@@ -191,34 +179,7 @@ class DatabricksGenieClient:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if self._http_client:
-            return await self._http_request(method, path, params=params, json_body=json)
-
-        if not self._sdk_client:
-            raise GenieAPIError("Databricks client was not initialized.")
-
-        try:
-            result = await asyncio.to_thread(
-                self._sdk_client.api_client.do,
-                method,
-                path,
-                query=params,
-                body=json,
-            )
-        except DatabricksError as exc:
-            raise GenieAPIError(
-                f"Databricks Genie API failed for {method} {path}: {exc}"
-            ) from exc
-        except Exception as exc:
-            raise GenieAPIError(
-                f"Databricks Genie API request could not be completed for {method} {path}: {exc}"
-            ) from exc
-
-        if result is None:
-            return {}
-        if isinstance(result, dict):
-            return result
-        return {"result": result}
+        return await self._http_request(method, path, params=params, json_body=json)
 
     def _space_id(self) -> str:
         return _quote_id(self.config.genie_space_id)
@@ -251,79 +212,6 @@ class DatabricksGenieClient:
             raise GenieAPIError(
                 f"Databricks Genie API returned non-JSON response: {response.text[:2000]}"
             ) from exc
-
-    def _resolve_bearer_token(self) -> str | None:
-        if self.config.databricks_token:
-            return self.config.databricks_token
-
-        if self.config.databricks_auth_type != "databricks-cli":
-            return None
-
-        return _get_cli_access_token(
-            cli_path=self.config.databricks_cli_path,
-            profile=self.config.databricks_config_profile,
-        )
-
-
-def _get_cli_access_token(cli_path: str | None, profile: str | None) -> str:
-    resolved_cli_path = _resolve_cli_path(cli_path)
-    command = [
-        resolved_cli_path,
-        "auth",
-        "token",
-        "-o",
-        "json",
-        "--timeout",
-        "10m",
-    ]
-    if profile:
-        command.extend(["--profile", profile])
-
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=660,
-        )
-    except FileNotFoundError as exc:
-        raise GenieAPIError(
-            "Databricks CLI was not found. Set DATABRICKS_CLI_PATH or install the Databricks CLI."
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip()[:2000]
-        raise GenieAPIError(f"Databricks CLI could not provide an OAuth token: {stderr}") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise GenieAPIError("Databricks CLI token lookup timed out.") from exc
-
-    try:
-        payload = json.loads(completed.stdout)
-    except ValueError as exc:
-        raise GenieAPIError("Databricks CLI returned a non-JSON token response.") from exc
-
-    access_token = payload.get("access_token")
-    if not access_token:
-        raise GenieAPIError("Databricks CLI token response did not include access_token.")
-    return str(access_token)
-
-
-def _resolve_cli_path(cli_path: str | None) -> str:
-    if not cli_path:
-        bundled = PROJECT_ROOT / ".tools" / "databricks.exe"
-        return str(bundled) if bundled.exists() else "databricks"
-
-    path = cli_path.replace("/", "\\")
-    candidate = PROJECT_ROOT / path
-    if not PathLike(path) and candidate.exists():
-        return str(candidate)
-    return path
-
-
-def PathLike(path: str) -> bool:
-    return ":" in path or path.startswith("\\")
-
 
 def compile_message(message: dict[str, Any], max_result_rows: int = 50) -> dict[str, Any]:
     attachments = _as_list(message.get("attachments"))

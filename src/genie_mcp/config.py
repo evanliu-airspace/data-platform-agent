@@ -36,6 +36,9 @@ class GenieConfig:
     databricks_auth_type: str | None = None
     databricks_config_profile: str | None = None
     databricks_cli_path: str | None = None
+    databricks_client_id: str | None = None
+    databricks_client_secret: str | None = None
+    databricks_oauth_scope: str | None = None
     poll_timeout_seconds: float = 600
     poll_initial_interval_seconds: float = 1
     poll_max_interval_seconds: float = 10
@@ -51,6 +54,9 @@ class GenieConfig:
         auth_type = _empty_to_none(os.getenv("DATABRICKS_AUTH_TYPE", "").strip())
         config_profile = _empty_to_none(os.getenv("DATABRICKS_CONFIG_PROFILE", "").strip())
         cli_path = _empty_to_none(os.getenv("DATABRICKS_CLI_PATH", "").strip())
+        client_id = _empty_to_none(os.getenv("DATABRICKS_CLIENT_ID", "").strip())
+        client_secret = _empty_to_none(os.getenv("DATABRICKS_CLIENT_SECRET", "").strip())
+        oauth_scope = _empty_to_none(os.getenv("DATABRICKS_OAUTH_SCOPE", "").strip())
 
         missing = []
         if not host:
@@ -69,6 +75,9 @@ class GenieConfig:
             databricks_auth_type=auth_type,
             databricks_config_profile=config_profile,
             databricks_cli_path=cli_path,
+            databricks_client_id=client_id,
+            databricks_client_secret=client_secret,
+            databricks_oauth_scope=oauth_scope,
             poll_timeout_seconds=_env_float("GENIE_POLL_TIMEOUT_SECONDS", 600),
             poll_initial_interval_seconds=_env_float("GENIE_POLL_INITIAL_INTERVAL_SECONDS", 1),
             poll_max_interval_seconds=_env_float("GENIE_POLL_MAX_INTERVAL_SECONDS", 10),
@@ -88,6 +97,7 @@ class GenieConfig:
         client_secret = os.getenv("DATABRICKS_CLIENT_SECRET", "").strip()
         openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
         openai_model = os.getenv("OPENAI_MODEL", "gpt-5.5").strip()
+        oauth_scope = os.getenv("DATABRICKS_OAUTH_SCOPE", "").strip()
         return {
             "databricks_host": host,
             "genie_space_id": space_id,
@@ -98,6 +108,7 @@ class GenieConfig:
             "databricks_cli_path": cli_path or None,
             "databricks_client_id_configured": bool(client_id),
             "databricks_client_secret_configured": bool(client_secret),
+            "databricks_oauth_scope": oauth_scope or "all-apis",
             "databricks_auth_hint": _auth_hint(
                 token=token,
                 auth_type=auth_type,
@@ -137,4 +148,4 @@ def _auth_hint(
         return "oauth-m2m"
     if config_profile:
         return "config-profile"
-    return "databricks-sdk-default-chain"
+    return "not-configured"

@@ -3,11 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import Disposition, ExecuteStatementRequestOnWaitTimeout, Format
+import httpx
 
+from .auth import resolve_bearer_token
 from .config import GenieConfig
-from .databricks_genie import _get_cli_access_token
 from .sql_guard import validate_read_only_sql
 
 
@@ -19,21 +18,16 @@ class DBSQLMCPClient:
     def __init__(self, config: GenieConfig):
         self.config = config
         self.server_url = f"{config.databricks_host}/api/2.0/sql/statements"
-        token = _resolve_bearer_token(config)
-        if token:
-            self._client = WorkspaceClient(
-                host=config.databricks_host,
-                token=token,
-                auth_type="pat",
-            )
-        else:
-            self._client = WorkspaceClient(
-                host=config.databricks_host,
-                auth_type=config.databricks_auth_type,
-                profile=config.databricks_config_profile,
-                product="databricks-genie-mcp-agent",
-                product_version="0.1.0",
-            )
+        token = resolve_bearer_token(config)
+        self._client = httpx.Client(
+            base_url=config.databricks_host,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=httpx.Timeout(60.0, connect=20.0),
+        )
 
     def list_read_only_tools(self) -> list[dict[str, Any]]:
         return [
@@ -111,22 +105,42 @@ class DBSQLMCPClient:
                 "Set it to the SQL warehouse ID that should run read-only queries."
             )
 
-        response = self._client.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=warehouse_id,
-            disposition=Disposition.INLINE,
-            format=Format.JSON_ARRAY,
-            on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
-            row_limit=100,
-            wait_timeout="10s",
+        return self._request(
+            "POST",
+            "/api/2.0/sql/statements",
+            json={
+                "statement": query,
+                "warehouse_id": warehouse_id,
+                "disposition": "INLINE",
+                "format": "JSON_ARRAY",
+                "on_wait_timeout": "CONTINUE",
+                "row_limit": 100,
+                "wait_timeout": "10s",
+            },
         )
-        return compact_sql_result(_as_dict(response))
 
     def _poll_statement(self, statement_id: str) -> dict[str, Any]:
         if not statement_id:
             raise ValueError("poll_sql_result needs statement_id.")
-        response = self._client.statement_execution.get_statement(statement_id)
-        return compact_sql_result(_as_dict(response))
+        return self._request("GET", f"/api/2.0/sql/statements/{statement_id}")
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = self._client.request(method, path, json=json)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Databricks SQL Statements API returned HTTP {response.status_code}: {response.text[:2000]}"
+            ) from exc
+        if not response.content:
+            return {}
+        return compact_sql_result(response.json())
 
 
 def compact_sql_result(payload: dict[str, Any], max_rows: int = 100) -> dict[str, Any]:
@@ -154,17 +168,6 @@ def compact_sql_result(payload: dict[str, Any], max_rows: int = 100) -> dict[str
         compacted["result"] = payload.get("result")
 
     return {key: value for key, value in compacted.items() if value is not None}
-
-
-def _resolve_bearer_token(config: GenieConfig) -> str | None:
-    if config.databricks_token:
-        return config.databricks_token
-    if config.databricks_auth_type == "databricks-cli":
-        return _get_cli_access_token(
-            cli_path=config.databricks_cli_path,
-            profile=config.databricks_config_profile,
-        )
-    return None
 
 
 def _extract_columns(manifest: dict[str, Any]) -> list[str]:
@@ -234,10 +237,3 @@ def _state(payload: dict[str, Any]) -> str:
         return str(status.get("state") or "").upper()
     return ""
 
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if hasattr(value, "as_dict"):
-        return value.as_dict()
-    return {"result": value}
