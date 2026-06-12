@@ -183,15 +183,15 @@ The server exposes:
 - `get_genie_space`: verify the configured Genie Space.
 - `health`: show non-secret runtime configuration.
 
-## Run A Read-Only DBSQL MCP Agent
+## Run A Read-Only DBSQL Agent
 
-This mode connects to the Databricks managed DBSQL MCP server:
+This mode uses the Databricks SQL Statements API through the Databricks SDK. Set a SQL warehouse ID before using it:
 
-```text
-https://adb-415889795140801.1.azuredatabricks.net/api/2.0/mcp/sql
+```env
+DATABRICKS_WAREHOUSE_ID=<your-sql-warehouse-id>
 ```
 
-It only exposes `execute_sql_read_only` and `poll_sql_result` to the agent, and it also validates SQL locally before execution.
+It only exposes `execute_sql_read_only` and `poll_sql_result` to the agent, and it validates SQL locally before execution.
 
 Ask one question:
 

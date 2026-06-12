@@ -31,6 +31,7 @@ def _env_float(name: str, default: float) -> float:
 class GenieConfig:
     databricks_host: str
     genie_space_id: str
+    databricks_warehouse_id: str | None = None
     databricks_token: str | None = None
     databricks_auth_type: str | None = None
     databricks_config_profile: str | None = None
@@ -45,6 +46,7 @@ class GenieConfig:
 
         host = os.getenv("DATABRICKS_HOST", DEFAULT_DATABRICKS_HOST).strip().rstrip("/")
         space_id = os.getenv("GENIE_SPACE_ID", DEFAULT_GENIE_SPACE_ID).strip()
+        warehouse_id = _empty_to_none(os.getenv("DATABRICKS_WAREHOUSE_ID", "").strip())
         token = _empty_to_none(os.getenv("DATABRICKS_TOKEN", "").strip())
         auth_type = _empty_to_none(os.getenv("DATABRICKS_AUTH_TYPE", "").strip())
         config_profile = _empty_to_none(os.getenv("DATABRICKS_CONFIG_PROFILE", "").strip())
@@ -62,6 +64,7 @@ class GenieConfig:
         return cls(
             databricks_host=host,
             genie_space_id=space_id,
+            databricks_warehouse_id=warehouse_id,
             databricks_token=token,
             databricks_auth_type=auth_type,
             databricks_config_profile=config_profile,
@@ -76,6 +79,7 @@ class GenieConfig:
         _load_env()
         host = os.getenv("DATABRICKS_HOST", DEFAULT_DATABRICKS_HOST).strip().rstrip("/")
         space_id = os.getenv("GENIE_SPACE_ID", DEFAULT_GENIE_SPACE_ID).strip()
+        warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID", "").strip()
         token = os.getenv("DATABRICKS_TOKEN", "").strip()
         auth_type = os.getenv("DATABRICKS_AUTH_TYPE", "").strip()
         config_profile = os.getenv("DATABRICKS_CONFIG_PROFILE", "").strip()
@@ -87,6 +91,7 @@ class GenieConfig:
         return {
             "databricks_host": host,
             "genie_space_id": space_id,
+            "databricks_warehouse_id": warehouse_id or None,
             "databricks_token_configured": bool(token),
             "databricks_auth_type": auth_type or None,
             "databricks_config_profile": config_profile or None,

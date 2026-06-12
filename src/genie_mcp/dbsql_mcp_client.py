@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
 from databricks.sdk import WorkspaceClient
-from databricks_mcp import DatabricksMCPClient
+from databricks.sdk.service.sql import Disposition, ExecuteStatementRequestOnWaitTimeout, Format
 
 from .config import GenieConfig
 from .databricks_genie import _get_cli_access_token
@@ -19,40 +18,54 @@ TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "CANCELLED", "CLOSED"}
 class DBSQLMCPClient:
     def __init__(self, config: GenieConfig):
         self.config = config
-        self.server_url = f"{config.databricks_host}/api/2.0/mcp/sql"
+        self.server_url = f"{config.databricks_host}/api/2.0/sql/statements"
         token = _resolve_bearer_token(config)
         if token:
-            workspace_client = WorkspaceClient(
+            self._client = WorkspaceClient(
                 host=config.databricks_host,
                 token=token,
                 auth_type="pat",
             )
         else:
-            workspace_client = WorkspaceClient(
+            self._client = WorkspaceClient(
                 host=config.databricks_host,
                 auth_type=config.databricks_auth_type,
                 profile=config.databricks_config_profile,
                 product="databricks-genie-mcp-agent",
                 product_version="0.1.0",
             )
-        self._client = DatabricksMCPClient(
-            server_url=self.server_url,
-            workspace_client=workspace_client,
-        )
 
     def list_read_only_tools(self) -> list[dict[str, Any]]:
-        tools = []
-        for tool in self._client.list_tools():
-            if tool.name not in READ_ONLY_TOOLS:
-                continue
-            tools.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.inputSchema,
-                }
-            )
-        return tools
+        return [
+            {
+                "name": "execute_sql_read_only",
+                "description": "Execute one read-only Databricks SQL statement through the SQL Statements API.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "A single SELECT, WITH, SHOW, DESCRIBE, DESC, or EXPLAIN statement.",
+                        }
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "poll_sql_result",
+                "description": "Poll a Databricks SQL statement by statement_id.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "statement_id": {
+                            "type": "string",
+                            "description": "Statement ID returned by execute_sql_read_only.",
+                        }
+                    },
+                    "required": ["statement_id"],
+                },
+            },
+        ]
 
     def execute_read_only_sql(
         self,
@@ -63,7 +76,7 @@ class DBSQLMCPClient:
         poll_interval_seconds: float = 2,
     ) -> dict[str, Any]:
         safe_query = validate_read_only_sql(query)
-        result = self.call_tool("execute_sql_read_only", {"query": safe_query})
+        result = self._execute_statement(safe_query)
         if not poll:
             return result
 
@@ -87,20 +100,33 @@ class DBSQLMCPClient:
             raise ValueError(f"Tool {tool_name!r} is not allowed. Allowed tools: {sorted(READ_ONLY_TOOLS)}.")
 
         if tool_name == "execute_sql_read_only":
-            arguments = dict(arguments)
-            arguments["query"] = validate_read_only_sql(str(arguments.get("query", "")))
+            return self.execute_read_only_sql(str(arguments.get("query") or ""))
+        return self._poll_statement(str(arguments.get("statement_id") or ""))
 
-        result = self._client.call_tool(tool_name, arguments)
-        structured = getattr(result, "structuredContent", None)
-        if isinstance(structured, dict):
-            return compact_sql_result(structured)
+    def _execute_statement(self, query: str) -> dict[str, Any]:
+        warehouse_id = self.config.databricks_warehouse_id
+        if not warehouse_id:
+            raise ValueError(
+                "DBSQL agent needs DATABRICKS_WAREHOUSE_ID. "
+                "Set it to the SQL warehouse ID that should run read-only queries."
+            )
 
-        text = _result_text(result)
-        try:
-            payload = json.loads(text)
-        except ValueError:
-            return {"text": text, "is_error": bool(getattr(result, "isError", False))}
-        return compact_sql_result(payload)
+        response = self._client.statement_execution.execute_statement(
+            statement=query,
+            warehouse_id=warehouse_id,
+            disposition=Disposition.INLINE,
+            format=Format.JSON_ARRAY,
+            on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
+            row_limit=100,
+            wait_timeout="10s",
+        )
+        return compact_sql_result(_as_dict(response))
+
+    def _poll_statement(self, statement_id: str) -> dict[str, Any]:
+        if not statement_id:
+            raise ValueError("poll_sql_result needs statement_id.")
+        response = self._client.statement_execution.get_statement(statement_id)
+        return compact_sql_result(_as_dict(response))
 
 
 def compact_sql_result(payload: dict[str, Any], max_rows: int = 100) -> dict[str, Any]:
@@ -209,13 +235,9 @@ def _state(payload: dict[str, Any]) -> str:
     return ""
 
 
-def _result_text(result: Any) -> str:
-    content = getattr(result, "content", None)
-    if not content:
-        return ""
-    parts = []
-    for item in content:
-        text = getattr(item, "text", None)
-        if text:
-            parts.append(str(text))
-    return "\n".join(parts)
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "as_dict"):
+        return value.as_dict()
+    return {"result": value}

@@ -16,7 +16,7 @@ from .sql_guard import SQLSafetyError
 
 
 SYSTEM_PROMPT = """
-You are a read-only Databricks SQL MCP agent.
+You are a read-only Databricks SQL agent.
 
 You can ask for tool execution by returning JSON only:
 {
@@ -116,7 +116,7 @@ async def run_question(
 
 
 async def interactive(args: argparse.Namespace) -> None:
-    print("Databricks DBSQL MCP read-only agent. Type 'exit' or Ctrl+C to quit.")
+    print("Databricks DBSQL read-only agent. Type 'exit' or Ctrl+C to quit.")
     history: list[dict[str, str]] = []
     while True:
         question = input("\nquestion> ").strip()
@@ -168,7 +168,7 @@ def _parse_action(content: str) -> dict[str, Any]:
 def _format_trace(endpoint: str, tool_log: list[dict[str, Any]]) -> str:
     trace = {
         "llm_endpoint": endpoint,
-        "mcp_server": "Databricks DBSQL MCP Server",
+        "sql_backend": "Databricks SQL Statements API",
         "allowed_tools": sorted(["execute_sql_read_only", "poll_sql_result"]),
         "tool_calls": tool_log,
     }
@@ -189,7 +189,7 @@ def _compact(answer: str, limit: int = 700) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Read-only Databricks DBSQL MCP agent."
+        description="Read-only Databricks DBSQL agent."
     )
     parser.add_argument("question", nargs="*", help="Question to ask. Omit to enter interactive mode.")
     parser.add_argument("--endpoint", help="Databricks Model Serving endpoint for the language model.")
@@ -210,4 +210,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

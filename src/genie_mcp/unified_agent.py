@@ -9,7 +9,7 @@ from . import dbx_agent_client
 
 AGENTS = {
     "genie": "Databricks Genie agent. Best for business questions covered by the Genie Space.",
-    "dbsql": "Read-only DBSQL MCP agent. Best for catalog/schema/table discovery and direct SQL-style analysis.",
+    "dbsql": "Read-only DBSQL agent. Best for catalog/schema/table discovery and direct SQL-style analysis.",
 }
 
 
@@ -107,7 +107,7 @@ def _handle_command(parts: list[str], current_agent: str) -> str | None:
     if command == "help":
         print("Commands:")
         print("  /agent genie    switch to Genie agent")
-        print("  /agent dbsql    switch to read-only DBSQL MCP agent")
+        print("  /agent dbsql    switch to read-only DBSQL agent")
         print("  /genie          shortcut for /agent genie")
         print("  /dbsql          shortcut for /agent dbsql")
         print("  agent dbsql     slash is optional")
