@@ -1,10 +1,6 @@
 command:
-  - uvicorn
-  - app:app
-  - --host
-  - 0.0.0.0
-  - --port
-  - ${DATABRICKS_APP_PORT}
+  - python
+  - app_stdlib.py
 env:
   - name: GENIE_SPACE_ID
     value: '01f0a8c81e88142fadad408f820867c3'
