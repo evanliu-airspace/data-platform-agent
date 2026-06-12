@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "databricks-genie-mcp-agent"
+version = "0.1.0"
+description = "Python MCP server and OpenAI agent client for Databricks Genie Spaces."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "databricks-mcp>=0.1.0",
+  "databricks-sdk>=0.40.0",
+  "fastapi>=0.115.0",
+  "httpx>=0.27.0",
+  "mcp>=1.9.0",
+  "python-dotenv>=1.0.1",
+  "uvicorn[standard]>=0.30.6",
+]
+
+[project.optional-dependencies]
+client = [
+  "openai-agents>=0.2.0",
+]
+
+[project.scripts]
+genie-mcp = "genie_mcp.server:main"
+genie-agent = "genie_mcp.agent_client:main"
+genie-direct = "genie_mcp.direct_client:main"
+genie-dbx-agent = "genie_mcp.dbx_agent_client:main"
+dbsql-mcp-agent = "genie_mcp.dbsql_mcp_agent:main"
+databricks-agent = "genie_mcp.unified_agent:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genie_mcp"]

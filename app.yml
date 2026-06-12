@@ -1,0 +1,20 @@
+command:
+  - uvicorn
+  - app:app
+  - --host
+  - 0.0.0.0
+  - --port
+  - ${DATABRICKS_APP_PORT}
+env:
+  - name: GENIE_SPACE_ID
+    value: '01f0a8c81e88142fadad408f820867c3'
+  - name: DATABRICKS_AUTH_TYPE
+    value: 'oauth-m2m'
+  - name: DATABRICKS_LLM_ENDPOINT
+    value: 'databricks-meta-llama-3-3-70b-instruct'
+  - name: GENIE_POLL_TIMEOUT_SECONDS
+    value: '600'
+  - name: GENIE_POLL_INITIAL_INTERVAL_SECONDS
+    value: '1'
+  - name: GENIE_POLL_MAX_INTERVAL_SECONDS
+    value: '10'
