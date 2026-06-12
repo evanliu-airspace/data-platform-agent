@@ -9,8 +9,8 @@ env:
   - name: DATABRICKS_LLM_ENDPOINT
     value: 'databricks-meta-llama-3-3-70b-instruct'
   # Required only when using the dbsql agent.
-  # - name: DATABRICKS_WAREHOUSE_ID
-  #   value: '<sql-warehouse-id>'
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: '415889795140801'
   - name: GENIE_POLL_TIMEOUT_SECONDS
     value: '600'
   - name: GENIE_POLL_INITIAL_INTERVAL_SECONDS
